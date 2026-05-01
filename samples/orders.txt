@@ -1,0 +1,4 @@
+Widget|3|19|hardware
+Cable Bundle|12|4|accessory
+Precision Gear|2|125|hardware
+Notebook|5|7|office
