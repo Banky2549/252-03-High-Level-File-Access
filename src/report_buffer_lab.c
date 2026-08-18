@@ -8,8 +8,10 @@ static void trim_newline(char *line) {
 	size_t length;
 
 	length = strlen(line);
-	if (length > 0 && line[length - 1] == '\n') {
+	// ตัดทั้ง \n และ \r ออกเพื่อรองรับ Line Endings ทุกรูปแบบ
+	while (length > 0 && (line[length - 1] == '\n' || line[length - 1] == '\r')) {
 		line[length - 1] = '\0';
+		length--;
 	}
 }
 
@@ -43,11 +45,31 @@ int load_orders(FILE *in, struct order_record records[], size_t capacity, struct
 		   - compute total_price
 		   - update longest_name, grand_total, and max_total
 		*/
-		snprintf(records[count].name, sizeof(records[count].name), "%s", line);
-		snprintf(records[count].category, sizeof(records[count].category), "unknown");
-		records[count].quantity = 0;
-		records[count].unit_price = 0;
-		records[count].total_price = 0;
+		struct order_record rec;
+
+		// อ่านข้อมูล name (สูงสุด 31 ตัว), quantity, unit_price, category (สูงสุด 15 ตัว)
+		int parsed = sscanf(line, "%31[^|]|%d|%d|%15[^\r\n]",
+		                    rec.name, &rec.quantity, &rec.unit_price, rec.category);
+
+		// ข้ามบรรทัดที่รูปแบบไม่ถูกต้อง (parsed ไม่ครบ 4 ฟิลด์)
+		if (parsed != 4) {
+			continue;
+		}
+
+		rec.total_price = rec.quantity * rec.unit_price;
+
+		size_t name_len = strlen(rec.name);
+		if (name_len > stats->longest_name) {
+			stats->longest_name = name_len;
+		}
+
+		if (count == 0 || rec.total_price > stats->max_total) {
+			stats->max_total = rec.total_price;
+		}
+
+		stats->grand_total += rec.total_price;
+
+		records[count] = rec;
 		count++;
 	}
 
@@ -70,8 +92,42 @@ int build_report(const struct order_record records[], size_t count, const struct
 	   - print the summary line last
 	   - fail if the report buffer is too small
 	*/
-	written = snprintf(out, out_size, "TODO(student): implement build_report for %zu records\n", count);
-	if (written < 0 || (size_t)written >= out_size) {
+	size_t offset = 0;
+
+	// 1. Header Line: "report | rows=4 | longest=14\n"
+	written = snprintf(out + offset, out_size - offset,
+	                   "report | rows=%zu | longest=%zu\n",
+	                   count, stats->longest_name);
+	if (written < 0 || (size_t)written >= out_size - offset) {
+		return -1;
+	}
+	offset += (size_t)written;
+
+	// 2. Data Rows: "01 | Widget         | qty= 3 | unit= 19 | total= 57 | cat=hardware\n"
+	for (size_t i = 0; i < count; i++) {
+		written = snprintf(out + offset, out_size - offset,
+		                   "%02zu | %-*s | qty=%2d | unit=%3d | total=%3d | cat=%s\n",
+		                   i + 1,
+		                   (int)stats->longest_name,
+		                   records[i].name,
+		                   records[i].quantity,
+		                   records[i].unit_price,
+		                   records[i].total_price,
+		                   records[i].category);
+		if (written < 0 || (size_t)written >= out_size - offset) {
+			return -1;
+		}
+		offset += (size_t)written;
+	}
+
+	// 3. Summary Line: "summary | grand_total=390 | max_total=250 | reads=4 | writes=1\n"
+	written = snprintf(out + offset, out_size - offset,
+	                   "summary | grand_total=%d | max_total=%d | reads=%zu | writes=%zu\n",
+	                   stats->grand_total,
+	                   stats->max_total,
+	                   stats->input_reads,
+	                   stats->output_writes);
+	if (written < 0 || (size_t)written >= out_size - offset) {
 		return -1;
 	}
 
